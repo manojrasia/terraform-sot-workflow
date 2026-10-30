@@ -1,8 +1,8 @@
 resource "google_service_account" "managed" {
   for_each = var.service_accounts
 
-  project      = each.value.project_id
-  account_id   = each.value.account_id
-  display_name = each.value.display_name
-  description  = each.value.description
+  project      = var.project_vars.gcp_project
+  account_id   = each.key
+  display_name = each.key
+  description  = each.value
 }
