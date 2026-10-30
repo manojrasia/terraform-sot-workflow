@@ -51,22 +51,24 @@ variable "gke_workload_identities" {
 }
 
 variable "firewall_rules" {
-  description = "VPC firewall ingress/egress rules keyed by a stable identifier."
-  type = map(object({
-    project_id    = string
-    name          = string
-    network       = string
-    direction     = string
-    priority      = number
-    source_ranges = optional(list(string), [])
-    target_tags   = optional(list(string), [])
-    allowed = optional(list(object({
+  description = "Firewall rule definitions supplied as a list in the SOT JSON."
+  type = list(object({
+    project_id             = string
+    name                   = string
+    action                 = string
+    description            = optional(string, "")
+    direction              = string
+    source_ranges           = optional(list(string), [])
+    destination_ranges      = optional(list(string), [])
+    rules = list(object({
       protocol = string
       ports    = optional(list(string))
-    })), [])
-    denied = optional(list(object({
-      protocol = string
-      ports    = optional(list(string))
-    })), [])
+    }))
+    target_id               = optional(string)
+    remote_id               = optional(string)
+    ticket_ref              = optional(string)
+    target_network_name     = string
+    target_service_account  = optional(string)
   }))
+  default = []
 }
