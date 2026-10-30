@@ -1,0 +1,1 @@
+{"firewall_rules":{"dev-ingress":{"project_id":"dummy-dev-project","name":"allow-web-dev","network":"projects/dummy-dev-project/global/networks/dev-vpc","direction":"INGRESS","priority":1000,"source_ranges":["10.10.0.0/16"],"allowed":[{"protocol":"tcp","ports":["80","443"]}]}}}

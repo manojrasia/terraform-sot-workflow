@@ -1,27 +1,23 @@
 locals {
-  iam_config = jsondecode(file("${path.module}/roles.json"))
-
-  assignments = flatten([
-    for project_id, project in local.iam_config.projects : [
+  project_role_assignments = flatten([
+    for project_id, project in var.project_roles : [
       for role, members in project.roles : [
         for member in members : {
           project_id = project_id
-          role       = role
-          member     = member
+          role = role
+          member = member
         }
       ]
     ]
   ])
-
-  iam_map = {
-    for assignment in local.assignments :
-    jsonencode([assignment.project_id, assignment.role, assignment.member]) => assignment
+  project_role_map = {
+    for item in local.project_role_assignments :
+    jsonencode([item.project_id, item.role, item.member]) => item
   }
 }
-
-resource "google_project_iam_member" "managed" {
-  for_each = local.iam_map
-  project  = each.value.project_id
-  role     = each.value.role
-  member   = each.value.member
+resource "google_project_iam_member" "project_roles" {
+  for_each = local.project_role_map
+  project = each.value.project_id
+  role = each.value.role
+  member = each.value.member
 }
