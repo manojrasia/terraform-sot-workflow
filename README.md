@@ -42,7 +42,7 @@ This repository uses JSON files under `sot/` as the source of truth and Terrafor
 | `project_vars.auto.tfvars.json` | `project_vars` | Project environment, region, and labels metadata |
 | `service_account.auto.tfvars.json` | `service_accounts` | Google service accounts to create |
 | `service_account_roles.auto.tfvars.json` | `service_account_roles` | Project roles granted to managed service accounts |
-| `shared_vpc_users.auto.tfvars.json` | `shared_vpc_users` | Shared VPC host-project IAM grants |
+| `shared_vpc_users.auto.tfvars.json` | `shared_vpc_users` | Subnet-level Shared VPC IAM members, keyed by full subnet resource path |
 
 The requested spellings `firwall.json` and `projec_apis.auto.tfvars.json` are retained.
 
@@ -52,9 +52,31 @@ The requested spellings `firwall.json` and `projec_apis.auto.tfvars.json` are re
 - `google_project_iam_member` manages individual project IAM members and service-account project roles.
 - `google_service_account` creates the Google service accounts declared in the SOT.
 - `google_service_account_iam_member` grants `roles/iam.workloadIdentityUser` to the GKE Kubernetes service-account principal.
-- `google_compute_firewall` creates the declared VPC firewall rules.
+- `google_compute_subnetwork_iam_member` grants `roles/compute.networkUser` to each declared member on the specified Shared VPC subnet.\n- `google_compute_firewall` creates the declared VPC firewall rules.
 
 The project variables file is metadata for existing projects; this configuration does not create GCP projects. The referenced projects, VPC networks, and GKE clusters must already exist. Service accounts listed in `service_account.auto.tfvars.json` are created by Terraform.
+
+
+## Shared VPC subnet access
+
+The `shared_vpc_users.auto.tfvars.json` file maps each full subnet resource path to a list of IAM members. Terraform creates one subnet-level IAM member binding for every member in each list.
+
+Example:
+
+```json
+{
+  "shared_vpc_users": {
+    "projects/dummy-network-host-project/regions/asia-south1/subnetworks/sub-name": [
+      "serviceAccount:airflow@dummy-dev-project.iam.gserviceaccount.com",
+      "group:gcp.dummy-network-host-project.devops@example.com"
+    ]
+  }
+}
+```
+
+The supported member examples are Google service accounts (`serviceAccount:`) and Google Groups (`group:gcp.<project>.<groupname>@example.com`). The subnet path supplies the host project, region, and subnet name. The Terraform implementation fixes the role to `roles/compute.networkUser`.
+
+Use the full resource path format `projects/PROJECT_ID/regions/REGION/subnetworks/SUBNET_NAME`. The referenced host project and subnet must already exist. Adding a member creates a binding; removing a member removes that member's binding. Review plans carefully before applying IAM removals.
 
 ## Workload Identity
 
