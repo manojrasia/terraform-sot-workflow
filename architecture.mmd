@@ -1,0 +1,21 @@
+flowchart TD
+    A[Developer edits roles.json] --> B[Create Pull Request]
+    B --> C[GitHub Actions validation]
+    C --> D[JSON validation]
+    C --> E[Terraform fmt and validate]
+    D --> F{Validation passed?}
+    E --> F
+    F -- No --> G[Fix configuration]
+    G --> B
+    F -- Yes --> H[Terraform plan with read-only GCP identity]
+    H --> I[Plan summary and PR comment]
+    I --> J[Reviewer approval and merge]
+    J --> K[Push to main]
+    K --> L[GitHub production environment approval]
+    L --> M[WIF authentication with apply identity]
+    M --> N[Fresh Terraform plan from merged main]
+    N --> O[Terraform apply]
+    O --> P[GCP Project IAM bindings]
+    Q[(GCS remote Terraform state)] --- H
+    Q --- N
+    Q --- O

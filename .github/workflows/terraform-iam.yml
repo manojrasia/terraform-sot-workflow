@@ -1,0 +1,153 @@
+name: GCP IAM GitOps
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "roles.json"
+      - "*.tf"
+      - "scripts/**"
+      - ".github/workflows/terraform-iam.yml"
+  push:
+    branches: [main]
+    paths:
+      - "roles.json"
+      - "*.tf"
+      - "scripts/**"
+      - ".github/workflows/terraform-iam.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gcp-iam-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate IAM configuration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate JSON configuration
+        run: python scripts/validate_roles.py
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - name: Terraform format
+        run: terraform fmt -check -recursive
+      - name: Terraform init without backend
+        run: terraform init -backend=false
+      - name: Terraform validate
+        run: terraform validate
+
+  plan:
+    name: Terraform plan (PR)
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Authenticate with read-only WIF identity
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.PLAN_SERVICE_ACCOUNT }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - run: terraform init
+      - name: Terraform plan
+        run: terraform plan -no-color -out=tfplan
+      - name: Create plan summary
+        if: always()
+        run: |
+          {
+            echo "## Terraform Plan"
+            echo ""
+            if [ -f tfplan ]; then
+              terraform show -no-color tfplan > plan.txt
+              echo '~~~text'
+              cat plan.txt
+              echo '~~~'
+            else
+              echo "Terraform plan did not produce a plan file."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload plan output
+        if: always() && hashFiles('plan.txt') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-${{ github.event.pull_request.number }}
+          path: plan.txt
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Comment plan on PR
+        if: always() && hashFiles('plan.txt') != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('plan.txt', 'utf8');
+            const body = '## Terraform plan result\n\n<details><summary>Show plan</summary>\n\n~~~text\n' +
+              plan.slice(0, 50000) + '\n~~~\n</details>';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });
+
+  apply:
+    name: Terraform apply (after merge)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: gcp-production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate with apply WIF identity
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.APPLY_SERVICE_ACCOUNT }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - run: terraform init
+      - name: Generate fresh plan from merged main
+        run: terraform plan -no-color -out=tfplan
+      - name: Save plan summary
+        run: terraform show -no-color tfplan > plan.txt
+      - name: Apply exact generated plan
+        run: terraform apply -auto-approve tfplan
+      - name: Publish apply summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Terraform Apply Summary"
+            echo ""
+            echo "- Commit: ${GITHUB_SHA}"
+            echo "- Job status: **${JOB_STATUS}**"
+            if [ -f plan.txt ]; then
+              echo ""
+              echo "### Applied plan"
+              echo '~~~text'
+              cat plan.txt
+              echo '~~~'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
