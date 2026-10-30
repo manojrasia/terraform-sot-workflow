@@ -1,0 +1,148 @@
+name: GCP SOT Terraform
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "sot/**"
+      - "terraform/**"
+      - "scripts/**"
+      - ".github/workflows/terraform-iam.yml"
+  push:
+    branches: [main]
+    paths:
+      - "sot/**"
+      - "terraform/**"
+      - "scripts/**"
+      - ".github/workflows/terraform-iam.yml"
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: "true"
+
+concurrency:
+  group: gcp-sot-terraform-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate SOT and Terraform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate JSON source files
+        run: python scripts/validate_sot_json.py
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - name: Terraform format
+        run: terraform fmt -check -recursive terraform
+      - name: Terraform init without backend
+        run: terraform -chdir=terraform init -backend=false
+      - name: Terraform validate
+        run: terraform -chdir=terraform validate
+
+  plan:
+    name: Terraform plan (PR)
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Authenticate using read-only WIF identity
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.PLAN_SERVICE_ACCOUNT }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - name: Terraform init with remote backend
+        run: terraform -chdir=terraform init
+      - name: Terraform plan
+        run: |
+          terraform -chdir=terraform plan -no-color -input=false -out=tfplan \
+            -var-file=../sot/firwall.json \
+            -var-file=../sot/gke_workload_identities.auto.tfvars.json \
+            -var-file=../sot/projec_apis.auto.tfvars.json \
+            -var-file=../sot/project_roles.auto.tfvars.json \
+            -var-file=../sot/project_vars.auto.tfvars.json \
+            -var-file=../sot/service_account.auto.tfvars.json \
+            -var-file=../sot/service_account_roles.auto.tfvars.json \
+            -var-file=../sot/shared_vpc_users.auto.tfvars.json
+      - name: Publish plan summary
+        if: always()
+        run: |
+          {
+            echo "## Terraform plan"
+            if [ -f terraform/tfplan ]; then
+              terraform -chdir=terraform show -no-color tfplan > plan.txt
+              echo '~~~text'
+              cat plan.txt
+              echo '~~~'
+            else
+              echo "Terraform plan did not produce a plan file. Check the preceding steps."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload plan output
+        if: always() && hashFiles('plan.txt') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-${{ github.event.pull_request.number }}
+          path: plan.txt
+          retention-days: 3
+
+  apply:
+    name: Terraform apply (after merge)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: gcp-production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate using apply WIF identity
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.APPLY_SERVICE_ACCOUNT }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - name: Terraform init with remote backend
+        run: terraform -chdir=terraform init
+      - name: Create plan and apply merged configuration
+        run: |
+          terraform -chdir=terraform plan -no-color -input=false -out=tfplan \
+            -var-file=../sot/firwall.json \
+            -var-file=../sot/gke_workload_identities.auto.tfvars.json \
+            -var-file=../sot/projec_apis.auto.tfvars.json \
+            -var-file=../sot/project_roles.auto.tfvars.json \
+            -var-file=../sot/project_vars.auto.tfvars.json \
+            -var-file=../sot/service_account.auto.tfvars.json \
+            -var-file=../sot/service_account_roles.auto.tfvars.json \
+            -var-file=../sot/shared_vpc_users.auto.tfvars.json
+          terraform -chdir=terraform apply -input=false -auto-approve tfplan
+      - name: Publish apply summary
+        if: always()
+        run: |
+          {
+            echo "## Terraform apply"
+            echo "Commit: ${GITHUB_SHA}"
+            echo "Job status: ${{ job.status }}"
+            if [ -f terraform/tfplan ]; then
+              echo "A saved plan was generated for this run."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
