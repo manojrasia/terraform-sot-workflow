@@ -1,18 +1,16 @@
 locals {
-  project_role_assignments = flatten([
-    for project_id, project in var.project_roles : [
-      for role, members in project.roles : [
-        for member in members : {
-          project_id = project_id
-          role       = role
-          member     = member
-        }
-      ]
+  standard_role_binding_assignments = flatten([
+    for role, bindings in var.standard_role_bindings : [
+      for binding in bindings : {
+        project_id = local.target_project_id
+        role       = role
+        member     = binding.principal
+      }
     ]
   ])
 
   project_role_map = {
-    for item in local.project_role_assignments :
+    for item in local.standard_role_binding_assignments :
     jsonencode([item.project_id, item.role, item.member]) => item
   }
 
