@@ -45,10 +45,7 @@ locals {
     jsonencode([item.subnet, item.member]) => item
   }
 
-  gke_workload_identity_map = {
-    for item in var.gke_workload_identities :
-    jsonencode([item.project_id, item.namespace, item.kubernetes_service_account, item.service_account_key]) => item
-  }
+  gke_workload_identity_map = var.gke_workload_identities
 
   enabled_api_map = {
     for item in flatten([
