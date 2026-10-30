@@ -36,7 +36,7 @@ This repository uses JSON files under `sot/` as the source of truth and Terrafor
 | File | Terraform input | Purpose |
 |---|---|---|
 | `firwall.json` | `firewall_rules` | VPC firewall rules |
-| `gke_workload_identities.auto.tfvars.json` | `gke_workload_identities` | GKE Kubernetes SA to Google SA Workload Identity bindings |
+| `gke_workload_identities.auto.tfvars.json` | `gke_workload_identities` | Google service account email to GKE Kubernetes service-account principal mappings |
 | `projec_apis.auto.tfvars.json` | `project_apis` | APIs enabled per project |
 | `project_roles.auto.tfvars.json` | `project_roles` | Project IAM role/member assignments |
 | `project_vars.auto.tfvars.json` | `project_vars` | Project environment, region, and labels metadata |
@@ -80,16 +80,16 @@ Use the full resource path format `projects/PROJECT_ID/regions/REGION/subnetwork
 
 ## Workload Identity
 
-The workload identity entries refer to service-account keys declared in `service_account.auto.tfvars.json`. Create the Kubernetes service accounts in their namespaces and annotate them with the corresponding Google service account email. For example:
+The workload identity file maps each Google service account email (JSON key) to the GKE Kubernetes service-account principal (JSON value). The Google service accounts must exist or be created by this Terraform configuration. Create the Kubernetes service accounts in their namespaces and annotate each KSA with its corresponding GSA email. For example:
 
 ```yaml
 iam.gke.io/gcp-service-account: payments-gsa@dummy-dev-project.iam.gserviceaccount.com
 ```
 
-The Terraform binding uses the GKE workload identity principal format:
+The Terraform binding grants `roles/iam.workloadIdentityUser` on the GSA to the KSA principal. The JSON format is:
 
 ```text
-serviceAccount:PROJECT_ID.svc.id.goog[NAMESPACE/KSA_NAME]
+"gsa-email@PROJECT_ID.iam.gserviceaccount.com": "serviceAccount:PROJECT_ID.svc.id.goog[NAMESPACE/KSA_NAME]"
 ```
 
 ## Firewall safety
