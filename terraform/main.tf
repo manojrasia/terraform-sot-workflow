@@ -47,6 +47,10 @@ locals {
 
   gke_workload_identity_map = var.gke_workload_identities
 
+  firewall_rule_map = {
+    for rule in var.firewall_rules : rule.name => rule
+  }
+
   enabled_api_map = {
     for item in flatten([
       for project_id, services in var.project_apis : [
