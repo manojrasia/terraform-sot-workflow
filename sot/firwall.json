@@ -2,7 +2,7 @@
   "firewall_rules": [
     {
       "project_id": "dummy-dev-project",
-      "name": "allow-hsbc-gke-egress-proxy-dev",
+      "name": "allow-gke-egress-proxy-dev",
       "action": "ALLOW",
       "description": "Dummy egress access from GKE management workloads to approved proxy endpoints",
       "direction": "EGRESS",
@@ -12,7 +12,9 @@
       ],
       "rules": [
         {
-          "ports": ["37223"],
+          "ports": [
+            "37223"
+          ],
           "protocol": "TCP"
         }
       ],
@@ -34,7 +36,11 @@
       ],
       "rules": [
         {
-          "ports": ["8432", "8444", "8445"],
+          "ports": [
+            "8432",
+            "8444",
+            "8445"
+          ],
           "protocol": "TCP"
         }
       ],
@@ -45,10 +51,10 @@
       "target_service_account": "cloudsql-proxy@dummy-dev-project.iam.gserviceaccount.com"
     },
     {
-      "project_id": "dummy-prod-project",
-      "name": "allow-onprem-cloudsql-proxy-ingress-prod",
+      "project_id": "dummy-dev-project",
+      "name": "allow-onprem-cloudsql-proxy-ingress-dev",
       "action": "ALLOW",
-      "description": "Dummy ingress access from on-premises networks to Cloud SQL proxy",
+      "description": "Dummy ingress access from example private networks to Cloud SQL proxy",
       "direction": "INGRESS",
       "source_ranges": [
         "172.16.0.0/12",
@@ -57,15 +63,19 @@
       ],
       "rules": [
         {
-          "ports": ["8432", "8444", "8445"],
+          "ports": [
+            "8432",
+            "8444",
+            "8445"
+          ],
           "protocol": "TCP"
         }
       ],
-      "target_id": "sqlproxy-prod",
-      "remote_id": "onprem",
+      "target_id": "sqlproxy-dev",
+      "remote_id": "example-private-network",
       "ticket_ref": "DUMMY-SQLPROXY-002",
-      "target_network_name": "dummy-prod-vpc",
-      "target_service_account": "cloudsql-proxy@dummy-prod-project.iam.gserviceaccount.com"
+      "target_network_name": "dummy-dev-vpc",
+      "target_service_account": "cloudsql-proxy@dummy-dev-project.iam.gserviceaccount.com"
     }
   ]
 }
