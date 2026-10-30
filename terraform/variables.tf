@@ -45,13 +45,9 @@ variable "shared_vpc_users" {
 }
 
 variable "gke_workload_identities" {
-  description = "GKE Kubernetes service accounts authorized to impersonate managed Google service accounts."
-  type = list(object({
-    project_id                 = string
-    namespace                  = string
-    kubernetes_service_account = string
-    service_account_key        = string
-  }))
+  description = "Mapping of Google service account emails to GKE Kubernetes service account principals."
+  type        = map(string)
+  default     = {}
 }
 
 variable "firewall_rules" {
