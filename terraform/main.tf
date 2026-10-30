@@ -52,13 +52,8 @@ locals {
   }
 
   enabled_api_map = {
-    for item in flatten([
-      for project_id, services in var.project_apis : [
-        for service in services : {
-          project_id = project_id
-          service    = service
-        }
-      ]
-    ]) : "${item.project_id}/${item.service}" => item
+    for service in var.enabled_api_services : service => service
   }
+
+  target_project_id = one(keys(var.project_vars))
 }
