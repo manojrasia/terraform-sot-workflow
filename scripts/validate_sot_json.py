@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Validate JSON source-of-truth files under sot/."""
 
+import ipaddress
 import json
 import re
 import sys
@@ -19,14 +20,65 @@ REQUIRED_KEYS = {
 }
 
 
+def validate_firewall_rules(data, path):
+    rules = data["firewall_rules"]
+    if not isinstance(rules, list):
+        raise ValueError("firewall_rules must be an array of firewall rule objects")
+
+    names = set()
+    for index, rule in enumerate(rules):
+        label = f"firewall_rules[{index}]"
+        if not isinstance(rule, dict):
+            raise ValueError(f"{label} must be an object")
+
+        required = {
+            "project_id", "name", "action", "direction",
+            "rules", "target_network_name"
+        }
+        missing = required - rule.keys()
+        if missing:
+            raise ValueError(f"{label} is missing required fields: {', '.join(sorted(missing))}")
+
+        if rule["name"] in names:
+            raise ValueError(f"duplicate firewall rule name: {rule['name']!r}")
+        names.add(rule["name"])
+
+        if rule["action"] not in {"ALLOW", "DENY"}:
+            raise ValueError(f"{label}.action must be ALLOW or DENY")
+        if rule["direction"] not in {"INGRESS", "EGRESS"}:
+            raise ValueError(f"{label}.direction must be INGRESS or EGRESS")
+        if not isinstance(rule["rules"], list) or not rule["rules"]:
+            raise ValueError(f"{label}.rules must be a non-empty array")
+
+        for field in ("source_ranges", "destination_ranges"):
+            for cidr in rule.get(field, []):
+                try:
+                    ipaddress.ip_network(cidr, strict=False)
+                except ValueError as exc:
+                    raise ValueError(f"{label}.{field} has invalid CIDR {cidr!r}") from exc
+
+        for protocol_rule in rule["rules"]:
+            if not isinstance(protocol_rule, dict) or "protocol" not in protocol_rule:
+                raise ValueError(f"{label}.rules entries must contain protocol")
+            protocol = str(protocol_rule["protocol"]).lower()
+            if protocol not in {"tcp", "udp", "icmp", "esp", "ah", "ipip", "sctp"}:
+                raise ValueError(f"{label} has unsupported protocol {protocol!r}")
+            for port in protocol_rule.get("ports", []):
+                if not str(port).isdigit() or not 1 <= int(port) <= 65535:
+                    raise ValueError(f"{label} has invalid port {port!r}")
+
+        if rule["direction"] == "INGRESS" and rule.get("destination_ranges"):
+            raise ValueError(f"{label}: destination_ranges are not valid for ingress firewall rules")
+        if rule["direction"] == "EGRESS" and rule.get("source_ranges"):
+            raise ValueError(f"{label}: source_ranges are not valid for egress firewall rules")
+
+
 def validate_shared_vpc_users(data, path):
     users = data["shared_vpc_users"]
     if not isinstance(users, dict):
         raise ValueError("shared_vpc_users must be an object mapping subnet paths to member arrays")
 
-    subnet_pattern = re.compile(
-        r"^projects/[^/]+/regions/[^/]+/subnetworks/[^/]+$"
-    )
+    subnet_pattern = re.compile(r"^projects/[^/]+/regions/[^/]+/subnetworks/[^/]+$")
     for subnet, members in users.items():
         if not subnet_pattern.match(subnet):
             raise ValueError(
@@ -99,11 +151,13 @@ def main():
             raise SystemExit(1)
 
         try:
-            if filename == "shared_vpc_users.auto.tfvars.json":
+            if filename == "firwall.json":
+                validate_firewall_rules(data, path)
+            elif filename == "shared_vpc_users.auto.tfvars.json":
                 validate_shared_vpc_users(data, path)
             elif filename == "gke_workload_identities.auto.tfvars.json":
                 validate_gke_workload_identities(data, path)
-        except ValueError as exc:
+        except (ValueError, TypeError) as exc:
             print(f"ERROR: {path.relative_to(ROOT)}: {exc}", file=sys.stderr)
             raise SystemExit(1)
 
