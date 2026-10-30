@@ -13,11 +13,12 @@ variable "enabled_api_services" {
   default     = []
 }
 
-variable "project_roles" {
-  description = "Project IAM role-to-member assignments."
-  type = map(object({
-    roles = map(list(string))
-  }))
+variable "standard_role_bindings" {
+  description = "Standard project IAM roles mapped to principal objects; applied to the single project in project_vars."
+  type = map(list(object({
+    principal = string
+  })))
+  default = {}
 }
 
 variable "service_accounts" {
