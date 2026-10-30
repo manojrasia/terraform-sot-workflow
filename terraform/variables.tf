@@ -39,12 +39,9 @@ variable "service_account_roles" {
 }
 
 variable "shared_vpc_users" {
-  description = "IAM grants on Shared VPC host projects."
-  type = list(object({
-    host_project_id = string
-    member          = string
-    role            = string
-  }))
+  description = "Subnet-level Shared VPC IAM members keyed by full subnet resource path."
+  type        = map(list(string))
+  default     = {}
 }
 
 variable "gke_workload_identities" {
