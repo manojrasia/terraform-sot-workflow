@@ -49,6 +49,39 @@ def validate_shared_vpc_users(data, path):
             )
 
 
+def validate_gke_workload_identities(data, path):
+    mappings = data["gke_workload_identities"]
+    if not isinstance(mappings, dict):
+        raise ValueError("gke_workload_identities must be an object mapping GSA emails to KSA principals")
+
+    gsa_pattern = re.compile(
+        r"^[a-z][a-z0-9-]*@[a-z][a-z0-9-]*\.iam\.gserviceaccount\.com$"
+    )
+    ksa_pattern = re.compile(
+        r"^serviceAccount:([a-z][a-z0-9-]*)\.svc\.id\.goog\[([a-z0-9-]+)/([a-z0-9-]+)\]$"
+    )
+
+    for gsa_email, ksa_principal in mappings.items():
+        if not isinstance(gsa_email, str) or not gsa_pattern.fullmatch(gsa_email):
+            raise ValueError(f"invalid Google service account email key: {gsa_email!r}")
+        if not isinstance(ksa_principal, str):
+            raise ValueError(f"KSA principal for {gsa_email!r} must be a string")
+
+        match = ksa_pattern.fullmatch(ksa_principal)
+        if not match:
+            raise ValueError(
+                f"invalid KSA principal {ksa_principal!r}; expected "
+                "serviceAccount:PROJECT_ID.svc.id.goog[NAMESPACE/KSA_NAME]"
+            )
+
+        gsa_project = gsa_email.split("@", 1)[1].split(".", 1)[0]
+        if match.group(1) != gsa_project:
+            raise ValueError(
+                f"project mismatch: GSA {gsa_email!r} and KSA principal "
+                f"{ksa_principal!r} must use the same project ID"
+            )
+
+
 def main():
     for filename, expected_key in REQUIRED_KEYS.items():
         path = ROOT / "sot" / filename
@@ -65,12 +98,14 @@ def main():
             )
             raise SystemExit(1)
 
-        if filename == "shared_vpc_users.auto.tfvars.json":
-            try:
+        try:
+            if filename == "shared_vpc_users.auto.tfvars.json":
                 validate_shared_vpc_users(data, path)
-            except ValueError as exc:
-                print(f"ERROR: {path.relative_to(ROOT)}: {exc}", file=sys.stderr)
-                raise SystemExit(1)
+            elif filename == "gke_workload_identities.auto.tfvars.json":
+                validate_gke_workload_identities(data, path)
+        except ValueError as exc:
+            print(f"ERROR: {path.relative_to(ROOT)}: {exc}", file=sys.stderr)
+            raise SystemExit(1)
 
     print(f"Validated {len(REQUIRED_KEYS)} SOT JSON files.")
 
