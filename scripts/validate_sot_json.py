@@ -39,7 +39,7 @@ def validate_standard_role_bindings(data):
     if not isinstance(bindings, dict) or not bindings:
         raise ValueError("standard_role_bindings must be a non-empty object")
     for role, entries in bindings.items():
-        if not isinstance(role, str) or not role.startswith("roles/"):
+        if not isinstance(role, str) or not (role.startswith("roles/") or re.fullmatch(r"projects/[a-z][a-z0-9-]*/roles/[A-Za-z0-9_.]+", role)):
             raise ValueError(f"invalid IAM role: {role!r}")
         if not isinstance(entries, list) or not entries:
             raise ValueError(f"{role} must have at least one principal")
