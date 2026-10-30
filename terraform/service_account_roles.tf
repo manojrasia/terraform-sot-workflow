@@ -1,7 +1,7 @@
-resource "google_project_iam_member" "service_account_roles" {
+resource "google_service_account_iam_member" "service_account_role_bindings" {
   for_each = local.service_account_role_map
 
-  project = each.value.project_id
-  role    = each.value.role
-  member  = google_service_account.managed[each.value.service_account_key].member
+  service_account_id = google_service_account.managed[each.value.service_account_key].name
+  role               = each.value.role
+  member             = each.value.member
 }
