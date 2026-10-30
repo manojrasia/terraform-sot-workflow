@@ -2,6 +2,7 @@
 """Validate JSON source-of-truth files under sot/."""
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -16,6 +17,36 @@ REQUIRED_KEYS = {
     "project_vars.auto.tfvars.json": "project_vars",
     "service_account.auto.tfvars.json": "service_accounts",
 }
+
+
+def validate_shared_vpc_users(data, path):
+    users = data["shared_vpc_users"]
+    if not isinstance(users, dict):
+        raise ValueError("shared_vpc_users must be an object mapping subnet paths to member arrays")
+
+    subnet_pattern = re.compile(
+        r"^projects/[^/]+/regions/[^/]+/subnetworks/[^/]+$"
+    )
+    for subnet, members in users.items():
+        if not subnet_pattern.match(subnet):
+            raise ValueError(
+                f"invalid subnet path {subnet!r}; expected "
+                "projects/PROJECT_ID/regions/REGION/subnetworks/SUBNET_NAME"
+            )
+        if not isinstance(members, list) or not members:
+            raise ValueError(f"members for {subnet!r} must be a non-empty array")
+
+        for member in members:
+            if not isinstance(member, str):
+                raise ValueError(f"member entries for {subnet!r} must be strings")
+            if member.startswith("serviceAccount:"):
+                continue
+            if re.fullmatch(r"group:gcp\.[^@\s]+@[^@\s]+", member):
+                continue
+            raise ValueError(
+                f"unsupported member {member!r}; expected serviceAccount:... "
+                "or group:gcp.<project>.<groupname>@example.com"
+            )
 
 
 def main():
@@ -33,6 +64,13 @@ def main():
                 file=sys.stderr,
             )
             raise SystemExit(1)
+
+        if filename == "shared_vpc_users.auto.tfvars.json":
+            try:
+                validate_shared_vpc_users(data, path)
+            except ValueError as exc:
+                print(f"ERROR: {path.relative_to(ROOT)}: {exc}", file=sys.stderr)
+                raise SystemExit(1)
 
     print(f"Validated {len(REQUIRED_KEYS)} SOT JSON files.")
 
