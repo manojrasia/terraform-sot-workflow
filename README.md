@@ -28,7 +28,7 @@ This repository uses JSON files under `sot/` as the source of truth and Terrafor
 │   ├── firewall.tf
 │   └── outputs.tf
 ├── .github/workflows/terraform-iam.yml
-└── scripts/validate_roles.py
+└── scripts/validate_sot_json.py
 ```
 
 ## SOT file responsibilities
@@ -120,7 +120,7 @@ Run these commands from the repository root. All Terraform commands use `-chdir=
 ### 1. Validate the SOT JSON
 
 ```bash
-python scripts/validate_roles.py
+python scripts/validate_sot_json.py
 ```
 
 ### 2. Format and initialize Terraform
