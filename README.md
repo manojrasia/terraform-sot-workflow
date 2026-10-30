@@ -37,24 +37,24 @@ This repository uses JSON files under `sot/` as the source of truth and Terrafor
 |---|---|---|
 | `firwall.json` | `firewall_rules` | VPC firewall rules |
 | `gke_workload_identities.auto.tfvars.json` | `gke_workload_identities` | Google service account email to GKE Kubernetes service-account principal mappings |
-| `projec_apis.auto.tfvars.json` | `project_apis` | APIs enabled in `dummy-dev-project` |
+| `projec_apis.auto.tfvars.json` | `enabled_api_services` | APIs enabled in the single project declared in `project_vars` |
 | `project_roles.auto.tfvars.json` | `project_roles` | Project IAM role/member assignments |
 | `project_vars.auto.tfvars.json` | `project_vars` | Project environment, region, and labels metadata |
 | `service_account.auto.tfvars.json` | `service_accounts` | Google service accounts to create |
 | `service_account_roles.auto.tfvars.json` | `service_account_roles` | Project roles granted to managed service accounts |
 | `shared_vpc_users.auto.tfvars.json` | `shared_vpc_users` | Subnet-level Shared VPC IAM members, keyed by full subnet resource path |
 
-The requested spellings `firwall.json` and `projec_apis.auto.tfvars.json` are retained. Every SOT example is currently consolidated into `dummy-dev-project`.
+The requested spellings `firwall.json` and `projec_apis.auto.tfvars.json` are retained. The API SOT is a project-independent list named `enabled_api_services`; Terraform applies that list to the only project declared in `project_vars`.
 
 ## Terraform resources
 
-- `google_project_service` enables APIs.
+- `google_project_service` enables every service in `enabled_api_services` on the single project selected from `project_vars`.
 - `google_project_iam_member` manages individual project IAM members and service-account project roles.
 - `google_service_account` creates the Google service accounts declared in the SOT.
 - `google_service_account_iam_member` grants `roles/iam.workloadIdentityUser` to the GKE Kubernetes service-account principal.
 - `google_compute_subnetwork_iam_member` grants `roles/compute.networkUser` to each declared member on the specified Shared VPC subnet.\n- `google_compute_firewall` creates the declared VPC firewall rules.
 
-The project variables file is metadata for existing projects; this configuration does not create GCP projects. The referenced projects, VPC networks, and GKE clusters must already exist. Service accounts listed in `service_account.auto.tfvars.json` are created by Terraform.
+The project variables file must contain exactly one project and supplies the project ID used for API enablement. It is metadata for an existing project; this configuration does not create GCP projects. The referenced projects, VPC networks, and GKE clusters must already exist. Service accounts listed in `service_account.auto.tfvars.json` are created by Terraform.
 
 
 ## Shared VPC subnet access
