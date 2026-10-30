@@ -1,6 +1,6 @@
 # GCP SOT Terraform GitOps
 
-This repository uses JSON files under `sot/` as the source of truth and Terraform code under `terraform/` to manage selected GCP foundation and IAM configuration.
+This repository uses JSON files under `sot/` as the source of truth and Terraform code under `terraform/` to manage selected GCP foundation and IAM configuration. The current dummy configuration is intentionally scoped to one GCP project: `dummy-dev-project`.
 
 ## Repository layout
 
@@ -37,14 +37,14 @@ This repository uses JSON files under `sot/` as the source of truth and Terrafor
 |---|---|---|
 | `firwall.json` | `firewall_rules` | VPC firewall rules |
 | `gke_workload_identities.auto.tfvars.json` | `gke_workload_identities` | Google service account email to GKE Kubernetes service-account principal mappings |
-| `projec_apis.auto.tfvars.json` | `project_apis` | APIs enabled per project |
+| `projec_apis.auto.tfvars.json` | `project_apis` | APIs enabled in `dummy-dev-project` |
 | `project_roles.auto.tfvars.json` | `project_roles` | Project IAM role/member assignments |
 | `project_vars.auto.tfvars.json` | `project_vars` | Project environment, region, and labels metadata |
 | `service_account.auto.tfvars.json` | `service_accounts` | Google service accounts to create |
 | `service_account_roles.auto.tfvars.json` | `service_account_roles` | Project roles granted to managed service accounts |
 | `shared_vpc_users.auto.tfvars.json` | `shared_vpc_users` | Subnet-level Shared VPC IAM members, keyed by full subnet resource path |
 
-The requested spellings `firwall.json` and `projec_apis.auto.tfvars.json` are retained.
+The requested spellings `firwall.json` and `projec_apis.auto.tfvars.json` are retained. Every SOT example is currently consolidated into `dummy-dev-project`.
 
 ## Terraform resources
 
@@ -59,16 +59,16 @@ The project variables file is metadata for existing projects; this configuration
 
 ## Shared VPC subnet access
 
-The `shared_vpc_users.auto.tfvars.json` file maps each full subnet resource path to a list of IAM members. Terraform creates one subnet-level IAM member binding for every member in each list.
+The `shared_vpc_users.auto.tfvars.json` file maps each full subnet resource path to a list of IAM members. The dummy example uses `dummy-dev-project` as the network project. Terraform creates one subnet-level IAM member binding for every member in each list.
 
 Example:
 
 ```json
 {
   "shared_vpc_users": {
-    "projects/dummy-network-host-project/regions/asia-south1/subnetworks/sub-name": [
-      "serviceAccount:airflow@dummy-dev-project.iam.gserviceaccount.com",
-      "group:gcp.dummy-network-host-project.devops@example.com"
+    "projects/dummy-dev-project/regions/us-central1/subnetworks/dummy-dev-subnet": [
+      "serviceAccount:payments-gsa@dummy-dev-project.iam.gserviceaccount.com",
+      "group:gcp.dummy-dev-project.devops@company.com"
     ]
   }
 }
@@ -94,12 +94,12 @@ The Terraform binding grants `roles/iam.workloadIdentityUser` on the GSA to the 
 
 ## Firewall safety
 
-The firewall file is an illustrative ingress example. Review source CIDRs, protocols, ports, network self-links, and target tags. Avoid broad ingress ranges and administrative ports in production.
+The firewall file contains illustrative ingress and egress rules, all scoped to `dummy-dev-project` and `dummy-dev-vpc`. Review source/destination CIDRs, protocols, ports, network names, and target service accounts. The `203.0.113.0/24` and `192.0.2.0/24` ranges are documentation-only examples; replace them with approved ranges before deployment.
 
 ## Prerequisites and one-time setup
 
 1. Install Terraform (the workflow pins Terraform `1.9.8`) and the Google Cloud CLI if running locally.
-2. Replace every `dummy-*` project ID, example email, service-account setting, and VPC network reference in `sot/*.json`.
+2. Replace `dummy-dev-project`, example email addresses, service-account settings, subnet and VPC network references in `sot/*.json` with your actual single target project configuration.
 3. Ensure the referenced GCP projects, VPC networks, and GKE clusters already exist. The project metadata file does not create projects.
 4. Create a dedicated GCS bucket for Terraform state before the first backend initialization. Enable object versioning, uniform bucket-level access, and public access prevention.
 5. Replace `REPLACE_WITH_TERRAFORM_STATE_BUCKET` in `terraform/versions.tf` with the actual bucket name. Do not commit credentials or state files.
