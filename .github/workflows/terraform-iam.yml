@@ -36,7 +36,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Validate JSON source files
-        run: python scripts/validate_roles.py
+        run: python scripts/validate_sot_json.py
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.9.8"
