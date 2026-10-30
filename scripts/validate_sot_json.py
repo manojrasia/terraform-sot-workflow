@@ -12,7 +12,7 @@ REQUIRED_KEYS = {
     "firwall.json": "firewall_rules",
     "gke_workload_identities.auto.tfvars.json": "gke_workload_identities",
     "projec_apis.auto.tfvars.json": "enabled_api_services",
-    "project_roles.auto.tfvars.json": "project_roles",
+    "project_roles.auto.tfvars.json": "standard_role_bindings",
     "service_account_roles.auto.tfvars.json": "service_account_roles",
     "shared_vpc_users.auto.tfvars.json": "shared_vpc_users",
     "project_vars.auto.tfvars.json": "project_vars",
@@ -28,6 +28,41 @@ def validate_enabled_api_services(data, path):
         raise ValueError("enabled_api_services entries must be valid Google API service names")
     if len(services) != len(set(services)):
         raise ValueError("enabled_api_services contains duplicate API names")
+
+
+
+def validate_standard_role_bindings(data, path):
+    bindings = data["standard_role_bindings"]
+    if not isinstance(bindings, dict) or not bindings:
+        raise ValueError("standard_role_bindings must be a non-empty object keyed by IAM role")
+
+    group_pattern = re.compile(r"^group:gcp\\.[^@\\s]+@[^@\\s]+$")
+    service_account_pattern = re.compile(
+        r"^serviceAccount:[a-z][a-z0-9-]*@[a-z][a-z0-9-]*\\.iam\\.gserviceaccount\\.com$"
+    )
+
+    for role, principals in bindings.items():
+        if not isinstance(role, str) or not role.startswith("roles/"):
+            raise ValueError(f"invalid standard IAM role name: {role!r}")
+        if not isinstance(principals, list) or not principals:
+            raise ValueError(f"principals for {role!r} must be a non-empty array")
+        seen = set()
+        for index, item in enumerate(principals):
+            if not isinstance(item, dict) or set(item) != {"principal"}:
+                raise ValueError(
+                    f"{role}[{index}] must contain only the 'principal' property"
+                )
+            principal = item["principal"]
+            if not isinstance(principal, str):
+                raise ValueError(f"{role}[{index}].principal must be a string")
+            if not (group_pattern.fullmatch(principal) or service_account_pattern.fullmatch(principal)):
+                raise ValueError(
+                    f"unsupported principal {principal!r}; only group:gcp.<project>.<group>@domain "
+                    "and serviceAccount:<name>@<project>.iam.gserviceaccount.com are allowed"
+                )
+            if principal in seen:
+                raise ValueError(f"duplicate principal {principal!r} under {role!r}")
+            seen.add(principal)
 
 
 def validate_project_vars(data, path):
@@ -132,6 +167,7 @@ def main():
         "firwall.json": validate_firewall_rules,
         "gke_workload_identities.auto.tfvars.json": validate_gke_workload_identities,
         "projec_apis.auto.tfvars.json": validate_enabled_api_services,
+        "project_roles.auto.tfvars.json": validate_standard_role_bindings,
         "project_vars.auto.tfvars.json": validate_project_vars,
         "shared_vpc_users.auto.tfvars.json": validate_shared_vpc_users,
     }
