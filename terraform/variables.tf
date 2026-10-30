@@ -1,5 +1,5 @@
 variable "project_vars" {
-  description = "Project-level metadata and defaults for each existing GCP project."
+  description = "Project-level metadata and defaults for the single existing GCP project."
   type = map(object({
     environment = string
     region      = string
@@ -7,9 +7,10 @@ variable "project_vars" {
   }))
 }
 
-variable "project_apis" {
-  description = "APIs to enable, grouped by project ID."
-  type        = map(list(string))
+variable "enabled_api_services" {
+  description = "Google APIs to enable in the single project declared by project_vars."
+  type        = list(string)
+  default     = []
 }
 
 variable "project_roles" {
@@ -53,22 +54,22 @@ variable "gke_workload_identities" {
 variable "firewall_rules" {
   description = "Firewall rule definitions supplied as a list in the SOT JSON."
   type = list(object({
-    project_id             = string
-    name                   = string
-    action                 = string
-    description            = optional(string, "")
-    direction              = string
-    source_ranges           = optional(list(string), [])
-    destination_ranges      = optional(list(string), [])
+    project_id            = string
+    name                  = string
+    action                = string
+    description           = optional(string, "")
+    direction             = string
+    source_ranges         = optional(list(string), [])
+    destination_ranges    = optional(list(string), [])
     rules = list(object({
       protocol = string
       ports    = optional(list(string))
     }))
-    target_id               = optional(string)
-    remote_id               = optional(string)
-    ticket_ref              = optional(string)
-    target_network_name     = string
-    target_service_account  = optional(string)
+    target_id              = optional(string)
+    remote_id              = optional(string)
+    ticket_ref             = optional(string)
+    target_network_name    = string
+    target_service_account = optional(string)
   }))
   default = []
 }
