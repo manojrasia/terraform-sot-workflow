@@ -1,7 +1,7 @@
 flowchart TD
-    A[Developer edits SOT JSON] --> B[Pull Request]
-    B --> C[Validate six JSON files]
-    C --> D[Terraform fmt and validate]
+    A[Developer edits JSON under sot/] --> B[Pull Request]
+    B --> C[Validate eight SOT JSON files]
+    C --> D[Terraform fmt and validate in terraform/]
     D --> E[Terraform plan using read-only WIF identity]
     E --> F[Review plan and merge]
     F --> G[Production environment approval]
@@ -9,8 +9,9 @@ flowchart TD
     H --> I[Fresh Terraform plan and apply]
     I --> J[Enable project APIs]
     I --> K[Project IAM assignments]
-    I --> L[GKE Workload Identity IAM]
-    I --> M[Shared VPC IAM assignments]
-    I --> N[VPC firewall rules]
-    O[(GCS remote state)] --- E
-    O --- I
+    I --> L[Create service accounts and grant roles]
+    I --> M[GKE Workload Identity bindings]
+    I --> N[Shared VPC IAM assignments]
+    I --> O[VPC firewall rules]
+    P[(GCS remote state)] --- E
+    P --- I

@@ -1,80 +1,122 @@
 # GCP SOT Terraform GitOps
 
-The `sot/` directory is the source of truth for selected GCP APIs, IAM assignments, GKE Workload Identity bindings, Shared VPC users, and VPC firewall rules.
+This repository uses JSON files under `sot/` as the source of truth and Terraform code under `terraform/` to manage selected GCP foundation and IAM configuration.
 
-## SOT inputs
+## Repository layout
 
-| File | Variable | Purpose |
+```text
+.
+├── sot/
+│   ├── firwall.json
+│   ├── gke_workload_identities.auto.tfvars.json
+│   ├── projec_apis.auto.tfvars.json
+│   ├── project_roles.auto.tfvars.json
+│   ├── project_vars.auto.tfvars.json
+│   ├── service_account.auto.tfvars.json
+│   ├── service_account_roles.auto.tfvars.json
+│   └── shared_vpc_users.auto.tfvars.json
+├── terraform/
+│   ├── versions.tf
+│   ├── variables.tf
+│   ├── main.tf
+│   ├── apis.tf
+│   ├── project_iam.tf
+│   ├── service_accounts.tf
+│   ├── service_account_roles.tf
+│   ├── shared_vpc.tf
+│   ├── gke_workload_identity.tf
+│   ├── firewall.tf
+│   └── outputs.tf
+├── .github/workflows/terraform-iam.yml
+└── scripts/validate_roles.py
+```
+
+## SOT file responsibilities
+
+| File | Terraform input | Purpose |
 |---|---|---|
-| `sot/firwall.json` | `firewall_rules` | VPC firewall rules |
-| `sot/gke_workload_identities.auto.tfvars.json` | `gke_workload_identities` | GKE KSA to Google service-account federation |
-| `sot/projec_apis.auto.tfvars.json` | `project_apis` | APIs enabled in each project |
-| `sot/project_roles.auto.tfvars.json` | `project_roles` | Project IAM role/member assignments; replaces root roles.json |
-| `sot/service_account_roles.auto.tfvars.json` | `service_account_roles` | Roles granted to Google service accounts |
-| `sot/shared_vpc_users.auto.tfvars.json` | `shared_vpc_users` | Shared VPC host-project IAM members |
+| `firwall.json` | `firewall_rules` | VPC firewall rules |
+| `gke_workload_identities.auto.tfvars.json` | `gke_workload_identities` | GKE Kubernetes SA to Google SA Workload Identity bindings |
+| `projec_apis.auto.tfvars.json` | `project_apis` | APIs enabled per project |
+| `project_roles.auto.tfvars.json` | `project_roles` | Project IAM role/member assignments |
+| `project_vars.auto.tfvars.json` | `project_vars` | Project environment, region, and labels metadata |
+| `service_account.auto.tfvars.json` | `service_accounts` | Google service accounts to create |
+| `service_account_roles.auto.tfvars.json` | `service_account_roles` | Project roles granted to managed service accounts |
+| `shared_vpc_users.auto.tfvars.json` | `shared_vpc_users` | Shared VPC host-project IAM grants |
 
 The requested spellings `firwall.json` and `projec_apis.auto.tfvars.json` are retained.
 
-## Dummy values
+## Terraform resources
 
-All `dummy-*` project IDs, example project numbers, networks, service accounts, and email addresses are placeholders. Replace them before running against GCP. The sample VPC and service accounts must already exist.
+- `google_project_service` enables APIs.
+- `google_project_iam_member` manages individual project IAM members and service-account project roles.
+- `google_service_account` creates the Google service accounts declared in the SOT.
+- `google_service_account_iam_member` grants `roles/iam.workloadIdentityUser` to the GKE Kubernetes service-account principal.
+- `google_compute_firewall` creates the declared VPC firewall rules.
 
-## Terraform behavior
+The project variables file is metadata for existing projects; this configuration does not create GCP projects. The referenced projects, VPC networks, and GKE clusters must already exist. Service accounts listed in `service_account.auto.tfvars.json` are created by Terraform.
 
-- `google_project_service` enables listed APIs.
-- `google_project_iam_member` manages individual project IAM members.
-- `google_service_account_iam_member` grants GKE Workload Identity User to the Kubernetes service-account principal.
-- `google_compute_firewall` creates the declared firewall rules.
+## Workload Identity
 
-Terraform does not automatically load tfvars files from a subdirectory. The workflow and local command therefore pass all six files using explicit `-var-file` arguments.
-
-## GKE Workload Identity
-
-The Google service account must exist. Create the Kubernetes service account in the indicated namespace and annotate it with the Google service account email, for example:
+The workload identity entries refer to service-account keys declared in `service_account.auto.tfvars.json`. Create the Kubernetes service accounts in their namespaces and annotate them with the corresponding Google service account email. For example:
 
 ```yaml
 iam.gke.io/gcp-service-account: payments-gsa@dummy-dev-project.iam.gserviceaccount.com
 ```
 
-The Terraform IAM binding uses the principal format:
+The Terraform binding uses the GKE workload identity principal format:
 
 ```text
 serviceAccount:PROJECT_ID.svc.id.goog[NAMESPACE/KSA_NAME]
 ```
 
-## Firewall review
+## Firewall safety
 
-The firewall file is an illustrative ingress example. Review source CIDRs, protocols, ports, network self-links, and target tags. Do not copy sample rules into production without security review.
+The firewall file is an illustrative ingress example. Review source CIDRs, protocols, ports, network self-links, and target tags. Avoid broad ingress ranges and administrative ports in production.
 
 ## GitHub Actions
 
-Pull requests validate JSON and Terraform and run a plan for same-repository PRs using the read-only WIF service account. A push to main creates a fresh plan and applies it using the apply service account, behind the optional `gcp-production` GitHub Environment approval.
+The workflow:
+1. Validates all eight SOT JSON files.
+2. Runs Terraform formatting and validation from the `terraform/` directory.
+3. Runs a PR plan using a read-only WIF identity for same-repository PRs.
+4. After merge, creates a fresh plan and applies it using a separate apply WIF identity.
+5. Uses the `gcp-production` GitHub Environment for optional required reviewers.
 
 Configure repository secrets:
 - `WIF_PROVIDER`
 - `PLAN_SERVICE_ACCOUNT`
 - `APPLY_SERVICE_ACCOUNT`
 
-Restrict WIF trust to this repository and intended refs/events. Protect main and use least-privilege service accounts. Do not provide cloud credentials to fork PRs.
+Restrict WIF trust to this repository and intended refs/events. Protect `main`, use least-privilege identities, and do not grant cloud credentials to untrusted fork PRs.
 
 ## Backend and prerequisites
 
-Create the GCS state bucket separately, enable object versioning, uniform bucket-level access, and public access prevention, then replace the placeholder in `versions.tf`. The workflow does not create projects, VPCs, GKE clusters, service accounts, or the WIF provider.
+Create the GCS state bucket separately, enable object versioning, uniform bucket-level access, and public access prevention, then replace the bucket placeholder in `terraform/versions.tf`. The workflow does not create projects, VPCs, GKE clusters, or the WIF provider.
 
-## Local commands
+## Run locally
+
+Run the JSON validation from the repository root:
 
 ```bash
 python scripts/validate_roles.py
-terraform fmt -recursive
-terraform init
-terraform validate
-terraform plan \
-  -var-file=sot/firwall.json \
-  -var-file=sot/gke_workload_identities.auto.tfvars.json \
-  -var-file=sot/projec_apis.auto.tfvars.json \
-  -var-file=sot/project_roles.auto.tfvars.json \
-  -var-file=sot/service_account_roles.auto.tfvars.json \
-  -var-file=sot/shared_vpc_users.auto.tfvars.json
 ```
 
-Review the plan carefully. Removing an IAM assignment from the SOT input removes that binding if this state owns it. Avoid managing the same IAM tuple from multiple states or overlapping authoritative IAM resources.
+Run Terraform from the `terraform/` module directory. The explicit `-var-file` arguments are needed because the JSON files live outside the module directory:
+
+```bash
+terraform -chdir=terraform fmt -recursive
+terraform -chdir=terraform init
+terraform -chdir=terraform validate
+terraform -chdir=terraform plan \
+  -var-file=../sot/firwall.json \
+  -var-file=../sot/gke_workload_identities.auto.tfvars.json \
+  -var-file=../sot/projec_apis.auto.tfvars.json \
+  -var-file=../sot/project_roles.auto.tfvars.json \
+  -var-file=../sot/service_account_roles.auto.tfvars.json \
+  -var-file=../sot/shared_vpc_users.auto.tfvars.json \
+  -var-file=../sot/project_vars.auto.tfvars.json \
+  -var-file=../sot/service_account.auto.tfvars.json
+```
+
+All `dummy-*` project IDs, example email addresses, networks, and service-account values are placeholders. Replace them before running against GCP. Review the plan carefully; removing an IAM assignment from the SOT input removes that binding if this state owns it. Avoid managing the same IAM tuple from multiple Terraform states.
