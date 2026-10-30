@@ -36,9 +36,9 @@ def validate_standard_role_bindings(data, path):
     if not isinstance(bindings, dict) or not bindings:
         raise ValueError("standard_role_bindings must be a non-empty object keyed by IAM role")
 
-    group_pattern = re.compile(r"^group:gcp\\.[^@\\s]+@[^@\\s]+$")
+    group_pattern = re.compile(r"^group:gcp\.[^@\s]+@[^@\s]+$")
     service_account_pattern = re.compile(
-        r"^serviceAccount:[a-z][a-z0-9-]*@[a-z][a-z0-9-]*\\.iam\\.gserviceaccount\\.com$"
+        r"^serviceAccount:[a-z][a-z0-9-]*@[a-z][a-z0-9-]*\.iam\.gserviceaccount\.com$"
     )
 
     for role, principals in bindings.items():
@@ -137,7 +137,7 @@ def validate_gke_workload_identities(data, path):
     if not isinstance(mappings, dict):
         raise ValueError("gke_workload_identities must map GSA emails to KSA principals")
     gsa_pattern = re.compile(r"^[a-z][a-z0-9-]*@[a-z][a-z0-9-]*\.iam\.gserviceaccount\.com$")
-    ksa_pattern = re.compile(r"^serviceAccount:([a-z][a-z0-9-]*)\.svc\.id\.goog\[([a-z0-9-]+)/([a-z0-9-]+)\]$")
+        r"^serviceAccount:[a-z][a-z0-9-]*@[a-z][a-z0-9-]*\.iam\.gserviceaccount\.com$"
     for gsa_email, ksa_principal in mappings.items():
         if not isinstance(gsa_email, str) or not gsa_pattern.fullmatch(gsa_email):
             raise ValueError(f"invalid Google service account email key: {gsa_email!r}")
