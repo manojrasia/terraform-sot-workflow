@@ -1,1 +1,71 @@
-{"firewall_rules":{"dev-ingress":{"project_id":"dummy-dev-project","name":"allow-web-dev","network":"projects/dummy-dev-project/global/networks/dev-vpc","direction":"INGRESS","priority":1000,"source_ranges":["10.10.0.0/16"],"allowed":[{"protocol":"tcp","ports":["80","443"]}]}}}
+{
+  "firewall_rules": [
+    {
+      "project_id": "dummy-dev-project",
+      "name": "allow-hsbc-gke-egress-proxy-dev",
+      "action": "ALLOW",
+      "description": "Dummy egress access from GKE management workloads to approved proxy endpoints",
+      "direction": "EGRESS",
+      "destination_ranges": [
+        "203.0.113.10/32",
+        "203.0.113.11/32"
+      ],
+      "rules": [
+        {
+          "ports": ["37223"],
+          "protocol": "TCP"
+        }
+      ],
+      "target_id": "gke-mgmt",
+      "remote_id": "proxy-dev",
+      "ticket_ref": "DUMMY-617DFE",
+      "target_network_name": "dummy-dev-vpc",
+      "target_service_account": "gke-egress@dummy-dev-project.iam.gserviceaccount.com"
+    },
+    {
+      "project_id": "dummy-dev-project",
+      "name": "allow-cloudsql-proxy-ingress-dev",
+      "action": "ALLOW",
+      "description": "Dummy ingress access to Cloud SQL proxy from approved application subnet",
+      "direction": "INGRESS",
+      "source_ranges": [
+        "10.20.0.0/16",
+        "192.0.2.0/24"
+      ],
+      "rules": [
+        {
+          "ports": ["8432", "8444", "8445"],
+          "protocol": "TCP"
+        }
+      ],
+      "target_id": "sqlproxy-dev",
+      "remote_id": "app-dev",
+      "ticket_ref": "DUMMY-SQLPROXY-001",
+      "target_network_name": "dummy-dev-vpc",
+      "target_service_account": "cloudsql-proxy@dummy-dev-project.iam.gserviceaccount.com"
+    },
+    {
+      "project_id": "dummy-prod-project",
+      "name": "allow-onprem-cloudsql-proxy-ingress-prod",
+      "action": "ALLOW",
+      "description": "Dummy ingress access from on-premises networks to Cloud SQL proxy",
+      "direction": "INGRESS",
+      "source_ranges": [
+        "172.16.0.0/12",
+        "10.0.0.0/8",
+        "192.0.2.0/24"
+      ],
+      "rules": [
+        {
+          "ports": ["8432", "8444", "8445"],
+          "protocol": "TCP"
+        }
+      ],
+      "target_id": "sqlproxy-prod",
+      "remote_id": "onprem",
+      "ticket_ref": "DUMMY-SQLPROXY-002",
+      "target_network_name": "dummy-prod-vpc",
+      "target_service_account": "cloudsql-proxy@dummy-prod-project.iam.gserviceaccount.com"
+    }
+  ]
+}
