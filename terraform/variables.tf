@@ -1,10 +1,16 @@
 variable "project_vars" {
-  description = "Project-level metadata and defaults for the single existing GCP project."
-  type = map(object({
-    environment = string
-    region      = string
-    labels      = map(string)
-  }))
+  description = "Flat metadata for the single existing GCP project."
+  type = object({
+    authoritative        = string
+    gcp_project          = string
+    gcp_project_labels   = map(string)
+    gcp_project_name     = string
+    gcp_region           = string
+    gcp_zone             = string
+    hsbc_billing_account = string
+    folder_display_name  = string
+    vpc_host_project     = string
+  })
 }
 
 variable "enabled_api_services" {
@@ -22,23 +28,26 @@ variable "standard_role_bindings" {
 }
 
 variable "service_accounts" {
-  description = "Google service accounts to create, keyed by a stable logical name."
-  type = map(object({
-    project_id   = string
-    account_id   = string
-    display_name = string
-    description  = string
-  }))
+  description = "Logical service account names mapped to their descriptions."
+  type        = map(string)
 }
 
-variable "service_account_roles" {
-  description = "Project roles to grant to service accounts declared in service_account.auto.tfvars.json."
-  type = list(object({
-    project_id          = string
-    service_account_key = string
-    roles               = list(string)
-  }))
+
+variable "service_accounts_role_bindings_version" {
+  description = "Schema version for service account IAM role bindings."
+  type        = number
+  default     = 1
 }
+
+variable "service_accounts_role_bindings" {
+  description = "Service account keys mapped to role and member bindings."
+  type = map(list(object({
+    role    = string
+    members = list(string)
+  })))
+  default = {}
+}
+
 
 variable "shared_vpc_users" {
   description = "Subnet-level Shared VPC IAM members keyed by full subnet resource path."
