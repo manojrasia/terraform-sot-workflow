@@ -8,177 +8,181 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-REQUIRED_KEYS = {
+FILES = {
     "firwall.json": "firewall_rules",
     "gke_workload_identities.auto.tfvars.json": "gke_workload_identities",
     "projec_apis.auto.tfvars.json": "enabled_api_services",
     "project_roles.auto.tfvars.json": "standard_role_bindings",
-    "service_account_roles.auto.tfvars.json": "service_account_roles",
+    "service_account_roles.auto.tfvars.json": "service_accounts_role_bindings",
     "shared_vpc_users.auto.tfvars.json": "shared_vpc_users",
-    "project_vars.auto.tfvars.json": "project_vars",
+    "project_vars.auto.tfvars.json": "gcp_project",
     "service_account.auto.tfvars.json": "service_accounts",
 }
+GROUP_RE = re.compile(r"^group:gcp\.[^@\s]+@[^@\s]+$")
+SA_RE = re.compile(r"^serviceAccount:[a-z][a-z0-9-]*@[a-z][a-z0-9-]*\.iam\.gserviceaccount\.com$")
+GSA_EMAIL_RE = re.compile(r"^[a-z][a-z0-9-]*@[a-z][a-z0-9-]*\.iam\.gserviceaccount\.com$")
+KSA_RE = re.compile(r"^serviceAccount:([a-z][a-z0-9-]*)\.svc\.id\.goog\[([a-z0-9-]+)/([a-z0-9-]+)\]$")
 
 
-def validate_enabled_api_services(data, path):
+def validate_enabled_api_services(data):
     services = data["enabled_api_services"]
     if not isinstance(services, list) or not services:
         raise ValueError("enabled_api_services must be a non-empty array")
-    if any(not isinstance(service, str) or not re.fullmatch(r"[a-z0-9-]+\.googleapis\.com", service) for service in services):
-        raise ValueError("enabled_api_services entries must be valid Google API service names")
+    if any(not isinstance(x, str) or not re.fullmatch(r"[a-z0-9-]+\.googleapis\.com", x) for x in services):
+        raise ValueError("enabled_api_services contains an invalid Google API service name")
     if len(services) != len(set(services)):
-        raise ValueError("enabled_api_services contains duplicate API names")
+        raise ValueError("enabled_api_services contains duplicates")
 
 
-
-def validate_standard_role_bindings(data, path):
+def validate_standard_role_bindings(data):
     bindings = data["standard_role_bindings"]
     if not isinstance(bindings, dict) or not bindings:
-        raise ValueError("standard_role_bindings must be a non-empty object keyed by IAM role")
-
-    group_pattern = re.compile(r"^group:gcp\.[^@\s]+@[^@\s]+$")
-    service_account_pattern = re.compile(
-        r"^serviceAccount:[a-z][a-z0-9-]*@[a-z][a-z0-9-]*\.iam\.gserviceaccount\.com$"
-    )
-
-    for role, principals in bindings.items():
+        raise ValueError("standard_role_bindings must be a non-empty object")
+    for role, entries in bindings.items():
         if not isinstance(role, str) or not role.startswith("roles/"):
-            raise ValueError(f"invalid standard IAM role name: {role!r}")
-        if not isinstance(principals, list) or not principals:
-            raise ValueError(f"principals for {role!r} must be a non-empty array")
-        seen = set()
-        for index, item in enumerate(principals):
-            if not isinstance(item, dict) or set(item) != {"principal"}:
-                raise ValueError(
-                    f"{role}[{index}] must contain only the 'principal' property"
-                )
-            principal = item["principal"]
-            if not isinstance(principal, str):
-                raise ValueError(f"{role}[{index}].principal must be a string")
-            if not (group_pattern.fullmatch(principal) or service_account_pattern.fullmatch(principal)):
-                raise ValueError(
-                    f"unsupported principal {principal!r}; only group:gcp.<project>.<group>@domain "
-                    "and serviceAccount:<name>@<project>.iam.gserviceaccount.com are allowed"
-                )
-            if principal in seen:
-                raise ValueError(f"duplicate principal {principal!r} under {role!r}")
-            seen.add(principal)
+            raise ValueError(f"invalid IAM role: {role!r}")
+        if not isinstance(entries, list) or not entries:
+            raise ValueError(f"{role} must have at least one principal")
+        for entry in entries:
+            principal = entry.get("principal") if isinstance(entry, dict) else None
+            if not isinstance(principal, str) or not (GROUP_RE.fullmatch(principal) or SA_RE.fullmatch(principal)):
+                raise ValueError(f"unsupported standard IAM principal: {principal!r}")
 
 
-def validate_project_vars(data, path):
-    projects = data["project_vars"]
-    if not isinstance(projects, dict) or len(projects) != 1:
-        raise ValueError("project_vars must contain exactly one project for this single-project configuration")
+def validate_project_vars(data):
+    required = {"authoritative", "gcp_project", "gcp_project_labels", "gcp_project_name",
+                "gcp_region", "gcp_zone", "hsbc_billing_account", "folder_display_name",
+                "vpc_host_project"}
+    missing = required - data.keys()
+    if missing:
+        raise ValueError(f"project_vars is missing fields: {', '.join(sorted(missing))}")
+    if not isinstance(data["gcp_project"], str) or not data["gcp_project"]:
+        raise ValueError("gcp_project must be a non-empty string")
+    if not isinstance(data["gcp_project_labels"], dict):
+        raise ValueError("gcp_project_labels must be an object")
+    if not isinstance(data["authoritative"], str):
+        raise ValueError("authoritative must be a string")
 
 
-def validate_firewall_rules(data, path):
+def validate_service_accounts(data):
+    accounts = data["service_accounts"]
+    if not isinstance(accounts, dict) or not accounts:
+        raise ValueError("service_accounts must be a non-empty name-to-description object")
+    for name, description in accounts.items():
+        if not re.fullmatch(r"[a-z][a-z0-9-]{4,28}[a-z0-9]", name):
+            raise ValueError(f"invalid service account ID: {name!r}")
+        if not isinstance(description, str) or not description.strip():
+            raise ValueError(f"service account {name!r} must have a description")
+
+
+def validate_service_account_role_bindings(data, accounts):
+    if data.get("service_accounts_role_bindings_version") != 1:
+        raise ValueError("service_accounts_role_bindings_version must be 1")
+    bindings = data["service_accounts_role_bindings"]
+    if not isinstance(bindings, dict):
+        raise ValueError("service_accounts_role_bindings must be an object")
+    for account, role_entries in bindings.items():
+        if account not in accounts:
+            raise ValueError(f"role bindings reference undeclared service account {account!r}")
+        if not isinstance(role_entries, list):
+            raise ValueError(f"role bindings for {account!r} must be an array")
+        for entry in role_entries:
+            if not isinstance(entry, dict) or not {"role", "members"} <= entry.keys():
+                raise ValueError(f"each role binding for {account!r} needs role and members")
+            if not isinstance(entry["role"], str) or not entry["role"].startswith("roles/"):
+                raise ValueError(f"invalid role in service account {account!r}")
+            members = entry["members"]
+            if not isinstance(members, list) or not members:
+                raise ValueError(f"members for {account!r}/{entry['role']} must be non-empty")
+            for member in members:
+                if not isinstance(member, str) or not (GROUP_RE.fullmatch(member) or SA_RE.fullmatch(member)):
+                    raise ValueError(f"unsupported service account IAM member: {member!r}")
+
+
+def validate_firewall_rules(data):
     rules = data["firewall_rules"]
     if not isinstance(rules, list):
-        raise ValueError("firewall_rules must be an array of firewall rule objects")
+        raise ValueError("firewall_rules must be an array")
     names = set()
     for index, rule in enumerate(rules):
         label = f"firewall_rules[{index}]"
-        if not isinstance(rule, dict):
-            raise ValueError(f"{label} must be an object")
         required = {"project_id", "name", "action", "direction", "rules", "target_network_name"}
-        missing = required - rule.keys()
-        if missing:
-            raise ValueError(f"{label} is missing required fields: {', '.join(sorted(missing))}")
+        if not isinstance(rule, dict) or not required <= rule.keys():
+            raise ValueError(f"{label} is missing required firewall properties")
         if rule["name"] in names:
             raise ValueError(f"duplicate firewall rule name: {rule['name']!r}")
         names.add(rule["name"])
-        if rule["action"] not in {"ALLOW", "DENY"}:
-            raise ValueError(f"{label}.action must be ALLOW or DENY")
-        if rule["direction"] not in {"INGRESS", "EGRESS"}:
-            raise ValueError(f"{label}.direction must be INGRESS or EGRESS")
+        if rule["action"] not in {"ALLOW", "DENY"} or rule["direction"] not in {"INGRESS", "EGRESS"}:
+            raise ValueError(f"{label} has invalid action or direction")
         if not isinstance(rule["rules"], list) or not rule["rules"]:
             raise ValueError(f"{label}.rules must be a non-empty array")
         for field in ("source_ranges", "destination_ranges"):
             for cidr in rule.get(field, []):
-                try:
-                    ipaddress.ip_network(cidr, strict=False)
-                except ValueError as exc:
-                    raise ValueError(f"{label}.{field} has invalid CIDR {cidr!r}") from exc
-        for protocol_rule in rule["rules"]:
-            if not isinstance(protocol_rule, dict) or "protocol" not in protocol_rule:
-                raise ValueError(f"{label}.rules entries must contain protocol")
-            protocol = str(protocol_rule["protocol"]).lower()
-            if protocol not in {"tcp", "udp", "icmp", "esp", "ah", "ipip", "sctp"}:
-                raise ValueError(f"{label} has unsupported protocol {protocol!r}")
-            for port in protocol_rule.get("ports", []):
+                ipaddress.ip_network(cidr, strict=False)
+        for item in rule["rules"]:
+            if not isinstance(item, dict) or str(item.get("protocol", "")).lower() not in {
+                "tcp", "udp", "icmp", "esp", "ah", "ipip", "sctp"
+            }:
+                raise ValueError(f"{label} has an invalid protocol")
+            for port in item.get("ports", []):
                 if not str(port).isdigit() or not 1 <= int(port) <= 65535:
-                    raise ValueError(f"{label} has invalid port {port!r}")
-        if rule["direction"] == "INGRESS" and rule.get("destination_ranges"):
-            raise ValueError(f"{label}: destination_ranges are not valid for ingress firewall rules")
-        if rule["direction"] == "EGRESS" and rule.get("source_ranges"):
-            raise ValueError(f"{label}: source_ranges are not valid for egress firewall rules")
+                    raise ValueError(f"{label} has an invalid port: {port!r}")
 
 
-def validate_shared_vpc_users(data, path):
+def validate_shared_vpc_users(data):
     users = data["shared_vpc_users"]
     if not isinstance(users, dict):
-        raise ValueError("shared_vpc_users must be an object mapping subnet paths to member arrays")
-    subnet_pattern = re.compile(r"^projects/[^/]+/regions/[^/]+/subnetworks/[^/]+$")
+        raise ValueError("shared_vpc_users must map subnet paths to member arrays")
+    pattern = re.compile(r"^projects/[^/]+/regions/[^/]+/subnetworks/[^/]+$")
     for subnet, members in users.items():
-        if not subnet_pattern.fullmatch(subnet):
-            raise ValueError(f"invalid subnet resource path: {subnet!r}")
-        if not isinstance(members, list) or not members:
-            raise ValueError(f"members for {subnet!r} must be a non-empty array")
-        for member in members:
-            if not isinstance(member, str):
-                raise ValueError(f"member entries for {subnet!r} must be strings")
-            if member.startswith("serviceAccount:") or re.fullmatch(r"group:gcp\.[^@\s]+@[^@\s]+", member):
-                continue
-            raise ValueError(f"unsupported Shared VPC IAM member: {member!r}")
+        if not pattern.fullmatch(subnet) or not isinstance(members, list) or not members:
+            raise ValueError(f"invalid subnet path or empty member list: {subnet!r}")
+        if any(not isinstance(m, str) or not (GROUP_RE.fullmatch(m) or SA_RE.fullmatch(m)) for m in members):
+            raise ValueError(f"unsupported Shared VPC member for {subnet!r}")
 
 
-def validate_gke_workload_identities(data, path):
+def validate_gke_workload_identities(data, accounts):
     mappings = data["gke_workload_identities"]
     if not isinstance(mappings, dict):
         raise ValueError("gke_workload_identities must map GSA emails to KSA principals")
-    gsa_pattern = re.compile(r"^[a-z][a-z0-9-]*@[a-z][a-z0-9-]*\.iam\.gserviceaccount\.com$")
-        r"^serviceAccount:[a-z][a-z0-9-]*@[a-z][a-z0-9-]*\.iam\.gserviceaccount\.com$"
-    for gsa_email, ksa_principal in mappings.items():
-        if not isinstance(gsa_email, str) or not gsa_pattern.fullmatch(gsa_email):
-            raise ValueError(f"invalid Google service account email key: {gsa_email!r}")
-        match = ksa_pattern.fullmatch(ksa_principal) if isinstance(ksa_principal, str) else None
-        if not match:
-            raise ValueError(f"invalid KSA principal for {gsa_email!r}: {ksa_principal!r}")
-        gsa_project = gsa_email.split("@", 1)[1].split(".", 1)[0]
-        if match.group(1) != gsa_project:
-            raise ValueError(f"GSA and KSA project IDs do not match for {gsa_email!r}")
+    for email, principal in mappings.items():
+        if not isinstance(email, str) or not GSA_EMAIL_RE.fullmatch(email):
+            raise ValueError(f"invalid GSA email: {email!r}")
+        if not isinstance(principal, str):
+            raise ValueError(f"invalid KSA principal for {email!r}")
+        match = KSA_RE.fullmatch(principal)
+        if not match or match.group(1) != email.split("@", 1)[1].split(".", 1)[0]:
+            raise ValueError(f"GSA/KSA project mismatch or invalid KSA principal for {email!r}")
+        if email.split("@", 1)[0] not in accounts:
+            raise ValueError(f"GKE workload identity references undeclared service account {email!r}")
 
 
 def main():
     loaded = {}
-    for filename, expected_key in REQUIRED_KEYS.items():
+    for filename, key in FILES.items():
         path = ROOT / "sot" / filename
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            item = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            print(f"ERROR: {path.relative_to(ROOT)}: {exc}", file=sys.stderr)
-            raise SystemExit(1)
-        if not isinstance(data, dict) or expected_key not in data:
-            print(f"ERROR: {path.relative_to(ROOT)} must contain top-level key {expected_key!r}", file=sys.stderr)
-            raise SystemExit(1)
-        loaded[filename] = data
+            raise SystemExit(f"ERROR: {path.relative_to(ROOT)}: {exc}")
+        if not isinstance(item, dict) or key not in item:
+            raise SystemExit(f"ERROR: {path.relative_to(ROOT)} must contain top-level key {key!r}")
+        loaded[filename] = item
 
-    validators = {
-        "firwall.json": validate_firewall_rules,
-        "gke_workload_identities.auto.tfvars.json": validate_gke_workload_identities,
-        "projec_apis.auto.tfvars.json": validate_enabled_api_services,
-        "project_roles.auto.tfvars.json": validate_standard_role_bindings,
-        "project_vars.auto.tfvars.json": validate_project_vars,
-        "shared_vpc_users.auto.tfvars.json": validate_shared_vpc_users,
-    }
+    accounts = loaded["service_account.auto.tfvars.json"]["service_accounts"]
     try:
-        for filename, validator in validators.items():
-            validator(loaded[filename], ROOT / "sot" / filename)
-    except (ValueError, TypeError) as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        raise SystemExit(1)
+        validate_enabled_api_services(loaded["projec_apis.auto.tfvars.json"])
+        validate_standard_role_bindings(loaded["project_roles.auto.tfvars.json"])
+        validate_project_vars(loaded["project_vars.auto.tfvars.json"])
+        validate_service_accounts(loaded["service_account.auto.tfvars.json"])
+        validate_service_account_role_bindings(loaded["service_account_roles.auto.tfvars.json"], accounts)
+        validate_firewall_rules(loaded["firwall.json"])
+        validate_shared_vpc_users(loaded["shared_vpc_users.auto.tfvars.json"])
+        validate_gke_workload_identities(loaded["gke_workload_identities.auto.tfvars.json"], accounts)
+    except (ValueError, TypeError, KeyError) as exc:
+        raise SystemExit(f"ERROR: {exc}")
 
-    print(f"Validated {len(REQUIRED_KEYS)} SOT JSON files.")
+    print(f"Validated {len(FILES)} SOT JSON files.")
 
 
 if __name__ == "__main__":
