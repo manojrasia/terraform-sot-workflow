@@ -15,18 +15,20 @@ locals {
   }
 
   service_account_role_assignments = flatten([
-    for assignment in var.service_account_roles : [
-      for role in assignment.roles : {
-        project_id          = assignment.project_id
-        service_account_key = assignment.service_account_key
-        role                = role
-      }
+    for account_key, role_bindings in var.service_accounts_role_bindings : [
+      for binding in role_bindings : [
+        for principal in binding.members : {
+          service_account_key = account_key
+          role                = binding.role
+          member              = principal
+        }
+      ]
     ]
   ])
 
   service_account_role_map = {
-    for item in local.service_account_role_assignments :
-    jsonencode([item.project_id, item.role, item.service_account_key]) => item
+    for assignment in local.service_account_role_assignments :
+    jsonencode([assignment.service_account_key, assignment.role, assignment.member]) => assignment
   }
 
   shared_vpc_user_assignments = flatten([
