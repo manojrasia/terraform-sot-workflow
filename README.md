@@ -74,49 +74,115 @@ serviceAccount:PROJECT_ID.svc.id.goog[NAMESPACE/KSA_NAME]
 
 The firewall file is an illustrative ingress example. Review source CIDRs, protocols, ports, network self-links, and target tags. Avoid broad ingress ranges and administrative ports in production.
 
-## GitHub Actions
+## Prerequisites and one-time setup
 
-The workflow:
-1. Validates all eight SOT JSON files.
-2. Runs Terraform formatting and validation from the `terraform/` directory.
-3. Runs a PR plan using a read-only WIF identity for same-repository PRs.
-4. After merge, creates a fresh plan and applies it using a separate apply WIF identity.
-5. Uses the `gcp-production` GitHub Environment for optional required reviewers.
+1. Install Terraform (the workflow pins Terraform `1.9.8`) and the Google Cloud CLI if running locally.
+2. Replace every `dummy-*` project ID, example email, service-account setting, and VPC network reference in `sot/*.json`.
+3. Ensure the referenced GCP projects, VPC networks, and GKE clusters already exist. The project metadata file does not create projects.
+4. Create a dedicated GCS bucket for Terraform state before the first backend initialization. Enable object versioning, uniform bucket-level access, and public access prevention.
+5. Replace `REPLACE_WITH_TERRAFORM_STATE_BUCKET` in `terraform/versions.tf` with the actual bucket name. Do not commit credentials or state files.
+6. Configure GitHub OIDC Workload Identity Federation (WIF), restricting the provider trust to this repository and the intended branch/environment claims.
+7. Create separate least-privilege plan and apply service accounts. Grant the plan identity read permissions needed to inspect the managed resources and access the state bucket. Grant the apply identity only the permissions required for the declared resources and state access.
+8. Add these GitHub Actions repository secrets:
+   - `WIF_PROVIDER`: full Workload Identity Provider resource name.
+   - `PLAN_SERVICE_ACCOUNT`: plan service-account email.
+   - `APPLY_SERVICE_ACCOUNT`: apply service-account email.
+9. Protect `main`. Configure the `gcp-production` GitHub Environment with required reviewers if production approval is desired.
 
-Configure repository secrets:
-- `WIF_PROVIDER`
-- `PLAN_SERVICE_ACCOUNT`
-- `APPLY_SERVICE_ACCOUNT`
+Do not use service-account JSON keys. Do not grant cloud credentials to untrusted fork pull requests.
 
-Restrict WIF trust to this repository and intended refs/events. Protect `main`, use least-privilege identities, and do not grant cloud credentials to untrusted fork PRs.
+## Terraform execution
 
-## Backend and prerequisites
+Run these commands from the repository root. All Terraform commands use `-chdir=terraform`, so Terraform treats `terraform/` as the root module while the variable files are supplied from `../sot/`.
 
-Create the GCS state bucket separately, enable object versioning, uniform bucket-level access, and public access prevention, then replace the bucket placeholder in `terraform/versions.tf`. The workflow does not create projects, VPCs, GKE clusters, or the WIF provider.
-
-## Run locally
-
-Run the JSON validation from the repository root:
+### 1. Validate the SOT JSON
 
 ```bash
 python scripts/validate_roles.py
 ```
 
-Run Terraform from the `terraform/` module directory. The explicit `-var-file` arguments are needed because the JSON files live outside the module directory:
+### 2. Format and initialize Terraform
 
 ```bash
 terraform -chdir=terraform fmt -recursive
 terraform -chdir=terraform init
+```
+
+The first `init` connects to the configured GCS backend. The bucket must already exist and your local identity must have access to it. For syntax validation without contacting the backend, use:
+
+```bash
+terraform -chdir=terraform init -backend=false
 terraform -chdir=terraform validate
-terraform -chdir=terraform plan \
+```
+
+### 3. Create and review a plan
+
+```bash
+terraform -chdir=terraform plan -out=tfplan \
   -var-file=../sot/firwall.json \
   -var-file=../sot/gke_workload_identities.auto.tfvars.json \
   -var-file=../sot/projec_apis.auto.tfvars.json \
   -var-file=../sot/project_roles.auto.tfvars.json \
-  -var-file=../sot/service_account_roles.auto.tfvars.json \
-  -var-file=../sot/shared_vpc_users.auto.tfvars.json \
   -var-file=../sot/project_vars.auto.tfvars.json \
-  -var-file=../sot/service_account.auto.tfvars.json
+  -var-file=../sot/service_account.auto.tfvars.json \
+  -var-file=../sot/service_account_roles.auto.tfvars.json \
+  -var-file=../sot/shared_vpc_users.auto.tfvars.json
+
+terraform -chdir=terraform show tfplan
 ```
 
-All `dummy-*` project IDs, example email addresses, networks, and service-account values are placeholders. Replace them before running against GCP. Review the plan carefully; removing an IAM assignment from the SOT input removes that binding if this state owns it. Avoid managing the same IAM tuple from multiple Terraform states.
+Review every proposed API, IAM, service-account, and firewall change. Treat the plan file as sensitive because it can contain infrastructure details and sensitive values. Do not commit it or upload it to a public location.
+
+### 4. Apply only after approval
+
+```bash
+terraform -chdir=terraform apply tfplan
+```
+
+To discard a saved plan without applying it:
+
+```bash
+rm -f terraform/tfplan
+```
+
+The apply command above applies the exact saved plan. If the configuration or state changes after planning, generate and review a new plan instead.
+
+## GitHub Actions execution
+
+Workflow: `.github/workflows/terraform-iam.yml`
+
+| Event | Job | What it does |
+|---|---|---|
+| Pull request targeting `main` | `validate` | Validates JSON, checks Terraform formatting, initializes without backend, and validates the module |
+| Same-repository pull request | `plan` | Authenticates with the read-only WIF identity, initializes the GCS backend, and runs Terraform plan |
+| Push/merge to `main` | `validate`, then `apply` | Revalidates, authenticates with the apply WIF identity, creates a fresh plan, and applies it |
+
+### Pull request execution
+
+1. A developer edits one or more files under `sot/` or `terraform/` and opens a pull request to `main`.
+2. The validation job checks all eight JSON inputs, runs `terraform fmt -check`, initializes Terraform with `-backend=false`, and runs `terraform validate`.
+3. For a pull request originating from this repository, the plan job authenticates through GitHub OIDC/WIF using `PLAN_SERVICE_ACCOUNT`.
+4. The plan job initializes the configured GCS backend, supplies all eight JSON files using explicit `-var-file` paths, and creates a plan.
+5. The plan output is written to the GitHub Actions job summary and uploaded as a short-retention workflow artifact for review.
+
+Fork pull requests intentionally do not receive cloud credentials. Review their source changes and rely on the credential-free validation job.
+
+### Merge/apply execution
+
+1. After the pull request is reviewed and merged, a push to `main` triggers the workflow.
+2. The validation job runs again against the merged commit.
+3. The apply job waits for validation and the configured `gcp-production` environment approval, if reviewers are configured.
+4. The job authenticates with `APPLY_SERVICE_ACCOUNT` using WIF.
+5. It initializes the backend, creates a fresh plan from the merged SOT files, and applies that plan.
+6. The job logs and Terraform output are available in the GitHub Actions run.
+
+The pipeline deliberately generates a new plan after merge rather than applying a plan created against an earlier pull-request state. Configure the GitHub Environment reviewers and branch protection to enforce your production approval process.
+
+## Important safety notes
+
+- All sample project IDs, email addresses, service-account names, and networks are placeholders. Replace them before running against GCP.
+- Review firewall CIDRs, protocols, ports, and target tags before applying.
+- Review IAM role assignments for least privilege.
+- Removing an IAM assignment from the SOT input removes that binding if this Terraform state owns it.
+- Avoid managing the same IAM project/role/member tuple from multiple Terraform states or overlapping authoritative IAM resources.
+- Never commit Terraform state, plan files, credentials, or generated provider files.

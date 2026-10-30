@@ -22,6 +22,10 @@ permissions:
 env:
   TF_IN_AUTOMATION: "true"
 
+concurrency:
+  group: gcp-sot-terraform-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   validate:
     name: Validate SOT and Terraform
@@ -63,42 +67,40 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.9.8"
-      - name: Terraform init
+      - name: Terraform init with remote backend
         run: terraform -chdir=terraform init
       - name: Terraform plan
         run: |
-          terraform -chdir=terraform plan -no-color -out=tfplan \
+          terraform -chdir=terraform plan -no-color -input=false -out=tfplan \
             -var-file=../sot/firwall.json \
             -var-file=../sot/gke_workload_identities.auto.tfvars.json \
             -var-file=../sot/projec_apis.auto.tfvars.json \
             -var-file=../sot/project_roles.auto.tfvars.json \
-            -var-file=../sot/service_account_roles.auto.tfvars.json \
-            -var-file=../sot/shared_vpc_users.auto.tfvars.json \
             -var-file=../sot/project_vars.auto.tfvars.json \
-            -var-file=../sot/service_account.auto.tfvars.json
+            -var-file=../sot/service_account.auto.tfvars.json \
+            -var-file=../sot/service_account_roles.auto.tfvars.json \
+            -var-file=../sot/shared_vpc_users.auto.tfvars.json
       - name: Publish plan summary
         if: always()
         run: |
-          if [ -f terraform/tfplan ]; then
-            terraform -chdir=terraform show -no-color tfplan > plan.txt
-          fi
           {
             echo "## Terraform plan"
-            if [ -f plan.txt ]; then
+            if [ -f terraform/tfplan ]; then
+              terraform -chdir=terraform show -no-color tfplan > plan.txt
               echo '~~~text'
               cat plan.txt
               echo '~~~'
             else
-              echo "Terraform plan did not produce a plan file."
+              echo "Terraform plan did not produce a plan file. Check the preceding steps."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload plan output
         if: always() && hashFiles('plan.txt') != ''
         uses: actions/upload-artifact@v4
         with:
-          name: terraform-plan
+          name: terraform-plan-${{ github.event.pull_request.number }}
           path: plan.txt
-          retention-days: 7
+          retention-days: 3
 
   apply:
     name: Terraform apply (after merge)
@@ -119,17 +121,28 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.9.8"
-      - name: Terraform init
+      - name: Terraform init with remote backend
         run: terraform -chdir=terraform init
-      - name: Plan and apply merged configuration
+      - name: Create plan and apply merged configuration
         run: |
-          terraform -chdir=terraform plan -out=tfplan \
+          terraform -chdir=terraform plan -no-color -input=false -out=tfplan \
             -var-file=../sot/firwall.json \
             -var-file=../sot/gke_workload_identities.auto.tfvars.json \
             -var-file=../sot/projec_apis.auto.tfvars.json \
             -var-file=../sot/project_roles.auto.tfvars.json \
-            -var-file=../sot/service_account_roles.auto.tfvars.json \
-            -var-file=../sot/shared_vpc_users.auto.tfvars.json \
             -var-file=../sot/project_vars.auto.tfvars.json \
-            -var-file=../sot/service_account.auto.tfvars.json
-          terraform -chdir=terraform apply -auto-approve tfplan
+            -var-file=../sot/service_account.auto.tfvars.json \
+            -var-file=../sot/service_account_roles.auto.tfvars.json \
+            -var-file=../sot/shared_vpc_users.auto.tfvars.json
+          terraform -chdir=terraform apply -input=false -auto-approve tfplan
+      - name: Publish apply summary
+        if: always()
+        run: |
+          {
+            echo "## Terraform apply"
+            echo "Commit: ${GITHUB_SHA}"
+            echo "Job status: ${{ job.status }}"
+            if [ -f terraform/tfplan ]; then
+              echo "A saved plan was generated for this run."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
