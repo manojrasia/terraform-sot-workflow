@@ -53,5 +53,5 @@ locals {
     for service in var.enabled_api_services : service => service
   }
 
-  target_project_id = one(keys(var.project_vars))
+  target_project_id = var.project_vars.gcp_project
 }
