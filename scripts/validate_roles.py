@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 CONFIG = Path(__file__).resolve().parents[1] / "roles.json"
-MEMBER_RE = re.compile(r"^(user|group|serviceAccount|domain):[^\\s]+$")
+MEMBER_RE = re.compile(r"^(user|group|serviceAccount|domain):[^\s]+$")
 
 
 def fail(message):
