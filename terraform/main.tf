@@ -31,9 +31,18 @@ locals {
     jsonencode([item.project_id, item.role, item.service_account_key]) => item
   }
 
+  shared_vpc_user_assignments = flatten([
+    for subnet, members in var.shared_vpc_users : [
+      for member in members : {
+        subnet = subnet
+        member = member
+      }
+    ]
+  ])
+
   shared_vpc_user_map = {
-    for item in var.shared_vpc_users :
-    jsonencode([item.host_project_id, item.role, item.member]) => item
+    for item in local.shared_vpc_user_assignments :
+    jsonencode([item.subnet, item.member]) => item
   }
 
   gke_workload_identity_map = {
